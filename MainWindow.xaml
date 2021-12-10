@@ -5,6 +5,6 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:WinSnows"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800" Background="{x:Null}" WindowState="Maximized" Topmost="True" WindowStyle="None" AllowsTransparency="True" Loaded="Window_Loaded" >
+        Title="MainWindow" Height="650" Width="800" Background="{x:Null}" WindowState="Maximized" Topmost="True" WindowStyle="None" AllowsTransparency="True" Loaded="Window_Loaded" WindowStartupLocation="CenterScreen" >
     <Canvas x:Name="theCanvas"/>
 </Window>

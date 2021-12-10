@@ -19,13 +19,31 @@ namespace WinSnows
 {
     public class Global
     {
+        #region Debug Options
+        public static bool DEBUG_MODE = true;
+        //public static WindowState WINDOW_STATE = WindowState.Maximized;
+        public static WindowState WINDOW_STATE = WindowState.Normal;
+        public static int DEBUG_WINDOW_POS = 250;
+        #endregion
+
+
+        // settings
+        public static int flakeSize = 6;
         public static short numFlakes = 10;   // MAX: 32767
         public static short speed = 2;        // MAX: 32767
         public static short flow = 3;         // MAX: 32767
         public static short wobble = 4;       // MAX: 32767
-        public static int flakeLimit = 6000;
+        public static int flakeLimit = -1;
+        public static int accumulationLimit = -1;
 
-        public static Dictionary<double, StopPoint> stopPoints = new Dictionary<double, StopPoint>();
+        //public static Dictionary<int, StopPoint> stopPoints = new Dictionary<int, StopPoint>();
+        public static List<StopPoint> stopPoints = new List<StopPoint>();
+
+        public static double w = System.Windows.SystemParameters.PrimaryScreenWidth;
+        public static double h = System.Windows.SystemParameters.PrimaryScreenHeight;
+
+        public static int snowFloor = 0; // will be set on window load
+        public static int snowWidth = 0; // will be set on window load
 
         #region Window Stuff
 
@@ -149,16 +167,22 @@ namespace WinSnows
         {
             InitializeComponent();
 
-            ShowDesktopWindows();
-
-            double w = System.Windows.SystemParameters.PrimaryScreenWidth;
-            double h = System.Windows.SystemParameters.PrimaryScreenHeight;
-
-            SecondaryWindow win2 = new SecondaryWindow();
+            //ShowDesktopWindows();
+            
+            //SecondaryWindow win2 = new SecondaryWindow();
             //win2.Show();
         }
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            if (Global.DEBUG_MODE)
+            {
+                this.Left = Global.w + Global.DEBUG_WINDOW_POS;
+                this.WindowState = Global.WINDOW_STATE;
+            }
+
+            Global.snowFloor = (int)Application.Current.MainWindow.Height;
+            Global.snowWidth = (int)Application.Current.MainWindow.Width;
+
             flakes = new List<Flake>();
 
             DrawSnow();
@@ -174,7 +198,7 @@ namespace WinSnows
             foreach (Flake flake in flakes)
                 flake.UpdateFlake(rand);
 
-            if (flakes.Count > Global.flakeLimit)
+            if (flakes.Count > Global.flakeLimit && Global.flakeLimit > 0)
             {
                 theCanvas.Children.RemoveRange(0,Global.flakeLimit / 2);
                 flakes.RemoveRange(0, Global.flakeLimit / 2);
@@ -200,14 +224,31 @@ namespace WinSnows
 
     public class StopPoint
     {
-        public double X;
-        public double Y;
-        public double ID { get { return X * Y + X; } }
+        public int X;
+        public int Y;
         public int Count;
-        public StopPoint(double _x, double _y)
+        public int HitRange;
+        public StopPoint(int _x, int _y, int _hitRange)
         {
             X = _x;
             Y = _y;
+            HitRange = _hitRange;
+         }
+        public override string ToString()
+        {
+            return $"{X}, {Y} ({Count})";
+        }
+        public override bool Equals(object obj)
+        {
+            StopPoint other = obj as StopPoint;
+            if (obj == null || !this.GetType().Equals(obj.GetType()))
+                return false;
+            else
+                return (this.HitRange == other.HitRange);
+        }
+        public override int GetHashCode()
+        {
+            return (X << 2) ^ Y;
         }
     }
 
@@ -220,44 +261,59 @@ namespace WinSnows
         public Flake(Int32 _startPos)
         {
             flake = new Rectangle();
-            flake.Width = 2;
-            flake.Height = 2;
+            flake.Width = Global.flakeSize;
+            flake.Height = Global.flakeSize;
             flake.Fill = Brushes.White;
             flake.StrokeThickness = 0;
             Canvas.SetTop(flake, 2);
             Canvas.SetLeft(flake, _startPos);
         }
+        
         public void UpdateFlake(Random _rand)
         {
             if (atRest) return;
 
+
+
+            //if (lineTotal > (int)(Global.flakeSize))
+                //return;
+
             int x = (int)Canvas.GetLeft(flake);
             int y = (int)Canvas.GetTop(flake);
 
-            if (x > Application.Current.MainWindow.Width)
+            if (Canvas.GetTop(flake) >= Global.snowFloor - 25 && Global.stopPoints.Count > Global.snowWidth * 0.15)
+                Console.WriteLine();
+
+            // If snow reaches beyond the screen width, warp to other side
+            if (x > Global.snowWidth)
                 Canvas.SetLeft(flake, 0);
             if (x < 0)
-                Canvas.SetLeft(flake, (int)Application.Current.MainWindow.Width);
+                Canvas.SetLeft(flake, (int)Global.snowWidth);
 
-            if (Canvas.GetTop(flake) > Application.Current.MainWindow.Height - 25)
+            int adjustedX = (int)(x/Global.flakeSize);
+
+            // If snow reaches bottom
+            if (Canvas.GetTop(flake) > Global.snowFloor - 25)
             {
-                StopPoint here;
-                if (Global.stopPoints.ContainsKey(x * y + x))
+                StopPoint here = new StopPoint(x, y, adjustedX);
+                if (Global.stopPoints.Contains(here))// (adjustedX, out here))
                 {
-                    Global.stopPoints.TryGetValue(x * y + x, out here);
-                    here.Count++;
+                    StopPoint newPoint = Global.stopPoints.First<StopPoint>(item => item.HitRange == here.HitRange);
+                    if (here.Count < Global.accumulationLimit || Global.accumulationLimit < 0)
+                    {
+                        newPoint.Count++;
+                        Canvas.SetLeft(flake, x);
+                        Canvas.SetTop(flake, Canvas.GetTop(flake) - (Global.flakeSize * newPoint.Count));
+                    }
                 }
                 else
                 {
-                    here = new StopPoint(x,y);
-                    Global.stopPoints.Add(here.ID, here);
+                    here = new StopPoint(x,y, adjustedX);
+                    Global.stopPoints.Add(here);
                 }
-                if (here.Count < 5)
-                    Canvas.SetTop(flake, Canvas.GetTop(flake) - here.Count);
-                else
-                {
+                if (Global.accumulationLimit > 0 && here.Count >= Global.accumulationLimit)
                     flake = null;
-                }
+
                 atRest = true;
                 return;
             }
