@@ -23,7 +23,11 @@ namespace WinSnows
         public static short speed = 2;        // MAX: 32767
         public static short flow = 3;         // MAX: 32767
         public static short wobble = 4;       // MAX: 32767
+        public static int flakeLimit = 6000;
 
+        public static Dictionary<double, StopPoint> stopPoints = new Dictionary<double, StopPoint>();
+
+        #region Window Stuff
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -65,18 +69,18 @@ namespace WinSnows
                 MessageBox.Show("ERROR");
                 return;
             }
-            MessageBox.Show(rct.ToString());
 
-            myRect.X = rct.Left;
-            myRect.Y = rct.Top;
             myRect.Width = rct.Right - rct.Left;
             myRect.Height = rct.Bottom - rct.Top;
         }
+        #endregion
     }
 
 
     public partial class MainWindow : Window
     {
+
+        #region Window Stuff
         // Save window titles and handles in these lists.
         private static List<IntPtr> WindowHandles;
         private static List<string> WindowTitles;
@@ -133,11 +137,7 @@ namespace WinSnows
 
         }
 
-
-
-
-
-
+        #endregion
 
         private List<Flake> flakes;
 
@@ -154,23 +154,16 @@ namespace WinSnows
             double w = System.Windows.SystemParameters.PrimaryScreenWidth;
             double h = System.Windows.SystemParameters.PrimaryScreenHeight;
 
-            //List<WindowScrape.Types.HwndObject> windows = new List<WindowScrape.Types.HwndObject>();
-            //foreach (var window in WindowScrape.Types.HwndObject.GetWindows())
-            //    if (window.Location.Y > 0 && 
-            //        window.Location.Y < h &&
-            //        window.Location.X > 0 && 
-            //        window.Location.X <= w &&
-            //        window.Title != String.Empty &&
-            //        window.Title != "Hidden Window")
-            //        windows.Add(window);
-
-
-
+            SecondaryWindow win2 = new SecondaryWindow();
+            //win2.Show();
+        }
+        private void Window_Loaded(object sender, RoutedEventArgs e)
+        {
             flakes = new List<Flake>();
 
             DrawSnow();
 
-            timer.Interval = TimeSpan.FromMilliseconds(50);
+            timer.Interval = new TimeSpan(0, 0, 0, 0, 1000 / 60); //update at 60 fps
             timer.Tick += UpdateFlakes;
             timer.Start();
             stopWatch.Start();
@@ -181,7 +174,14 @@ namespace WinSnows
             foreach (Flake flake in flakes)
                 flake.UpdateFlake(rand);
 
-            if(stopWatch.Elapsed.TotalMilliseconds % Global.flow < 1)
+            if (flakes.Count > Global.flakeLimit)
+            {
+                theCanvas.Children.RemoveRange(0,Global.flakeLimit / 2);
+                flakes.RemoveRange(0, Global.flakeLimit / 2);
+                Console.WriteLine("FLAKES REMOVED");
+            }
+
+            if (stopWatch.Elapsed.TotalMilliseconds % Global.flow < 1)
                 DrawSnow();
 
         }
@@ -195,13 +195,28 @@ namespace WinSnows
                 theCanvas.Children.Add(flake.flake);
             }
         }
+
+    }
+
+    public class StopPoint
+    {
+        public double X;
+        public double Y;
+        public double ID { get { return X * Y + X; } }
+        public int Count;
+        public StopPoint(double _x, double _y)
+        {
+            X = _x;
+            Y = _y;
+        }
     }
 
     public class Flake
     {
         public Rectangle flake;
         private short readyForChange = 0;
-        private short direction = 0; // 0:straight, -1:left, 1:right
+        private float direction = 0; // 0:straight, -1:left, 1:right
+        private bool atRest = false;
         public Flake(Int32 _startPos)
         {
             flake = new Rectangle();
@@ -214,14 +229,47 @@ namespace WinSnows
         }
         public void UpdateFlake(Random _rand)
         {
-            Canvas.SetTop(flake, Canvas.GetTop(flake) + Global.speed);
+            if (atRest) return;
 
-            if (readyForChange++ > Global.wobble)
+            int x = (int)Canvas.GetLeft(flake);
+            int y = (int)Canvas.GetTop(flake);
+
+            if (x > Application.Current.MainWindow.Width)
+                Canvas.SetLeft(flake, 0);
+            if (x < 0)
+                Canvas.SetLeft(flake, (int)Application.Current.MainWindow.Width);
+
+            if (Canvas.GetTop(flake) > Application.Current.MainWindow.Height - 25)
             {
-                direction = (short)_rand.Next(-1,2);
+                StopPoint here;
+                if (Global.stopPoints.ContainsKey(x * y + x))
+                {
+                    Global.stopPoints.TryGetValue(x * y + x, out here);
+                    here.Count++;
+                }
+                else
+                {
+                    here = new StopPoint(x,y);
+                    Global.stopPoints.Add(here.ID, here);
+                }
+                if (here.Count < 5)
+                    Canvas.SetTop(flake, Canvas.GetTop(flake) - here.Count);
+                else
+                {
+                    flake = null;
+                }
+                atRest = true;
+                return;
+            }
+
+            if (readyForChange++ > Global.wobble / Global.speed)
+            {
+                direction = (float)(_rand.NextDouble() * 3 - 1.75);
                 readyForChange = 0;
             }
 
+
+            Canvas.SetTop(flake, Canvas.GetTop(flake) + Global.speed);
             Canvas.SetLeft(flake, Canvas.GetLeft(flake) + direction);
         }
     }
