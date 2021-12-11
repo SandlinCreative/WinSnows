@@ -21,15 +21,15 @@ namespace WinSnows
     {
         #region Debug Options
         public static bool DEBUG_MODE = true;
-        //public static WindowState WINDOW_STATE = WindowState.Maximized;
-        public static WindowState WINDOW_STATE = WindowState.Normal;
+        public static WindowState WINDOW_STATE = WindowState.Maximized;
+        //public static WindowState WINDOW_STATE = WindowState.Normal;
         public static int DEBUG_WINDOW_POS = 250;
         #endregion
 
 
         // settings
-        public static int flakeSize = 6;
-        public static short numFlakes = 10;   // MAX: 32767
+        public static int flakeSize = 2;
+        public static short numFlakes = 15;   // MAX: 32767
         public static short speed = 2;        // MAX: 32767
         public static short flow = 3;         // MAX: 32767
         public static short wobble = 4;       // MAX: 32767
@@ -38,12 +38,16 @@ namespace WinSnows
 
         //public static Dictionary<int, StopPoint> stopPoints = new Dictionary<int, StopPoint>();
         public static List<StopPoint> stopPoints = new List<StopPoint>();
+        public static List<Flake> flakes = new List<Flake>();
+        public static List<Rectangle> floorFlakes = new List<Rectangle>();
 
         public static double w = System.Windows.SystemParameters.PrimaryScreenWidth;
         public static double h = System.Windows.SystemParameters.PrimaryScreenHeight;
 
         public static int snowFloor = 0; // will be set on window load
         public static int snowWidth = 0; // will be set on window load
+
+        public static Rectangle Stick = new Rectangle();
 
         #region Window Stuff
 
@@ -157,7 +161,6 @@ namespace WinSnows
 
         #endregion
 
-        private List<Flake> flakes;
 
         private Random rand = new Random();
         private DispatcherTimer timer = new DispatcherTimer();
@@ -178,30 +181,38 @@ namespace WinSnows
             {
                 this.Left = Global.w + Global.DEBUG_WINDOW_POS;
                 this.WindowState = Global.WINDOW_STATE;
+                Global.Stick.Fill = Brushes.Magenta;
+                Global.Stick.Width = 800;
+                Global.Stick.Height = 1;
+                Canvas.SetTop(Global.Stick, Global.snowFloor);
+                theCanvas.Children.Add(Global.Stick);
             }
 
             Global.snowFloor = (int)Application.Current.MainWindow.Height;
             Global.snowWidth = (int)Application.Current.MainWindow.Width;
 
-            flakes = new List<Flake>();
-
             DrawSnow();
 
             timer.Interval = new TimeSpan(0, 0, 0, 0, 1000 / 60); //update at 60 fps
             timer.Tick += UpdateFlakes;
+            timer.Tick += UpdateStick;
             timer.Start();
             stopWatch.Start();
         }
-
+        private void UpdateStick(object sender, EventArgs e)
+        {
+            Canvas.SetTop(Global.Stick, Global.snowFloor);
+            Canvas.SetZIndex(Global.Stick, int.MaxValue);
+        }
         private void UpdateFlakes(object sender, EventArgs e)
         {
-            foreach (Flake flake in flakes)
+            foreach (Flake flake in Global.flakes)
                 flake.UpdateFlake(rand);
 
-            if (flakes.Count > Global.flakeLimit && Global.flakeLimit > 0)
+            if (Global.flakes.Count > Global.flakeLimit && Global.flakeLimit > 0)
             {
                 theCanvas.Children.RemoveRange(0,Global.flakeLimit / 2);
-                flakes.RemoveRange(0, Global.flakeLimit / 2);
+                Global.flakes.RemoveRange(0, Global.flakeLimit / 2);
                 Console.WriteLine("FLAKES REMOVED");
             }
 
@@ -215,7 +226,7 @@ namespace WinSnows
             for (int i = 0; i < Global.numFlakes; i++)
             {
                 Flake flake = new Flake(rand.Next((int)this.Width - 1));
-                flakes.Add(flake);
+                Global.flakes.Add(flake);
                 theCanvas.Children.Add(flake.flake);
             }
         }
@@ -227,16 +238,18 @@ namespace WinSnows
         public int X;
         public int Y;
         public int Count;
+        public List<Flake> Flakes = new List<Flake>();
         public int HitRange;
         public StopPoint(int _x, int _y, int _hitRange)
         {
             X = _x;
             Y = _y;
             HitRange = _hitRange;
+            Count = 0;
          }
         public override string ToString()
         {
-            return $"{X}, {Y} ({Count})";
+            return $"{X}, {Y} ({this.Count})";
         }
         public override bool Equals(object obj)
         {
@@ -258,6 +271,7 @@ namespace WinSnows
         private short readyForChange = 0;
         private float direction = 0; // 0:straight, -1:left, 1:right
         private bool atRest = false;
+        private int id;
         public Flake(Int32 _startPos)
         {
             flake = new Rectangle();
@@ -267,39 +281,42 @@ namespace WinSnows
             flake.StrokeThickness = 0;
             Canvas.SetTop(flake, 2);
             Canvas.SetLeft(flake, _startPos);
+            Random r = new Random();
+            id = r.Next();
         }
-        
+
+        public override bool Equals(object obj)
+        {
+            Flake other = obj as Flake;
+            if (obj == null || !this.GetType().Equals(obj.GetType()))
+                return false;
+            else
+                return ( Canvas.GetTop(this.flake) == Canvas.GetTop(other.flake) &&
+                         Canvas.GetLeft(this.flake) == Canvas.GetLeft(other.flake));
+        }
         public void UpdateFlake(Random _rand)
         {
-            if (atRest) return;
-
-
-
-            //if (lineTotal > (int)(Global.flakeSize))
-                //return;
+            if (flake == null || atRest) return;
 
             int x = (int)Canvas.GetLeft(flake);
             int y = (int)Canvas.GetTop(flake);
-
-            if (Canvas.GetTop(flake) >= Global.snowFloor - 25 && Global.stopPoints.Count > Global.snowWidth * 0.15)
-                Console.WriteLine();
-
+               
             // If snow reaches beyond the screen width, warp to other side
             if (x > Global.snowWidth)
                 Canvas.SetLeft(flake, 0);
             if (x < 0)
                 Canvas.SetLeft(flake, (int)Global.snowWidth);
 
-            int adjustedX = (int)(x/Global.flakeSize);
+            int adjustedX = (int)(x/1);
 
             // If snow reaches bottom
-            if (Canvas.GetTop(flake) > Global.snowFloor - 25)
+            if (y >= Global.snowFloor)
             {
                 StopPoint here = new StopPoint(x, y, adjustedX);
                 if (Global.stopPoints.Contains(here))// (adjustedX, out here))
                 {
                     StopPoint newPoint = Global.stopPoints.First<StopPoint>(item => item.HitRange == here.HitRange);
-                    if (here.Count < Global.accumulationLimit || Global.accumulationLimit < 0)
+                    if (newPoint.Count < Global.accumulationLimit || Global.accumulationLimit < 0)
                     {
                         newPoint.Count++;
                         Canvas.SetLeft(flake, x);
@@ -314,7 +331,16 @@ namespace WinSnows
                 if (Global.accumulationLimit > 0 && here.Count >= Global.accumulationLimit)
                     flake = null;
 
+                
+                Global.floorFlakes.Add(flake);
                 atRest = true;
+                
+                if(Global.floorFlakes.Count >= Global.w * 0.2)
+                {
+                    Global.snowFloor -= Global.flakeSize;
+                    Global.floorFlakes.Clear();
+                }
+
                 return;
             }
 
