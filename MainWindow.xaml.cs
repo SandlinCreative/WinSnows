@@ -12,30 +12,34 @@ using System.Windows.Threading;
 
 namespace WinSnows
 {
+    public delegate void Callback(Flake rmFlake);
+
     public class Global
     {
         #region Debug Options
         public static bool DEBUG_MODE = true;
-        //public static WindowState WINDOW_STATE = WindowState.Maximized;
-        public static WindowState WINDOW_STATE = WindowState.Normal;
+        public static WindowState WINDOW_STATE = WindowState.Maximized;
+        //public static WindowState WINDOW_STATE = WindowState.Normal;
         public static int WINDOW_WIDTH = 800;
         public static int WINDOW_HEIGHT = 250;
         #endregion
 
 
         // settings
-        public static int flakeSize = 2;
+        public static int flakeSize = 4;
         public static short numFlakes = 15;   // MAX: 32767
         public static short speed = 2;        // MAX: 32767
         public static short flow = 3;         // MAX: 32767
         public static short wobble = 4;       // MAX: 32767
         public static int flakeLimit = -1;
         public static int accumulationLimit = -1;
+        public static int floorIncriment = flakeSize;
 
         //public static Dictionary<int, StopPoint> stopPoints = new Dictionary<int, StopPoint>();
         public static List<StopPoint> stopPoints = new List<StopPoint>();
         public static List<Flake> flakes = new List<Flake>();
-        public static List<Rectangle> floorFlakes = new List<Rectangle>();
+        public static List<Flake> floorFlakes = new List<Flake>();
+        public static List<Flake> flakesMarkedForObliteration = new List<Flake>();
 
         public static double w = System.Windows.SystemParameters.PrimaryScreenWidth;
         public static double h = System.Windows.SystemParameters.PrimaryScreenHeight;
@@ -180,15 +184,19 @@ namespace WinSnows
                     this.Height = Global.WINDOW_HEIGHT;
                 }
 
-                Global.Stick.Fill = Brushes.Magenta;
-                Global.Stick.Width = 800;
-                Global.Stick.Height = 1;
-                Canvas.SetTop(Global.Stick, Global.snowFloor);
-                theCanvas.Children.Add(Global.Stick);
+                //Global.Stick.Stroke = Brushes.Magenta;
+                //Global.Stick.StrokeThickness = 1;
             }
 
             Global.snowFloor = (int)Application.Current.MainWindow.Height;
             Global.snowWidth = (int)Application.Current.MainWindow.Width;
+
+            Global.Stick.Fill = Brushes.White;
+            Global.Stick.Width = Global.snowWidth;
+            Global.Stick.Height = 1;
+            Canvas.SetTop(Global.Stick, Global.snowFloor - 1);
+            Canvas.SetZIndex(Global.Stick, int.MaxValue);
+            theCanvas.Children.Add(Global.Stick);
 
             DrawSnow();
 
@@ -205,7 +213,7 @@ namespace WinSnows
         {
             for (int i = 0; i < Global.numFlakes; i++)
             {
-                Flake flake = new Flake(rand.Next(1,(int)this.Width - 1));
+                Flake flake = new Flake(rand.Next(1,(int)this.Width - 1), RemoveMeCallback, ObliterateMeCallback);
                 Global.flakes.Add(flake);
                 theCanvas.Children.Add(flake.flake);
             }
@@ -216,28 +224,39 @@ namespace WinSnows
 
         private void UpdateStick(object sender, EventArgs e)
         {
+            Global.Stick.Height += Global.floorIncriment;
             Canvas.SetTop(Global.Stick, Global.snowFloor - 1);
-            Canvas.SetZIndex(Global.Stick, int.MaxValue);
         }
         private void UpdateFlakes(object sender, EventArgs e)
         {
+            // Snow level limiter
+            if (Global.snowFloor <= 50) return;
+
             // Updates each and every flake on the screen
             foreach (Flake flake in Global.flakes)
                 flake.UpdateFlake(rand);
 
-            // Executes if flakeLimit is set
-            if (Global.flakes.Count > Global.flakeLimit && Global.flakeLimit > 0)
-            {
-                theCanvas.Children.RemoveRange(0,Global.flakeLimit / 2);
-                Global.flakes.RemoveRange(0, Global.flakeLimit / 2);
-                Console.WriteLine("FLAKES REMOVED");
-            }
+            // Obliterates flakes given the death mark on last update loop
+            foreach (Flake deathFlake in Global.flakesMarkedForObliteration)
+                deathFlake.ObliterateCallback(deathFlake);
+
+            // Clear out the obliteration list
+            Global.flakesMarkedForObliteration.Clear();
 
             // Draws new flakes according to the flow setting
             if (stopWatch.Elapsed.TotalMilliseconds % Global.flow < 1)
                 DrawSnow();
         }
-    }
+        public void RemoveMeCallback(Flake flakeToRemove)
+        {
+            theCanvas.Children.Remove(flakeToRemove.flake);
+        }
+        public void ObliterateMeCallback(Flake flakeToRemove)
+        {
+            Global.flakes.Remove(flakeToRemove);
+            flakeToRemove = null;
+        }
+    }   // end MainWindow
 
     public class StopPoint
     {
@@ -252,7 +271,7 @@ namespace WinSnows
             Y = _y;
             HitRange = _hitRange;
             Count = 0;
-         }
+        }
         public override string ToString()
         {
             return $"{X}, {Y} ({this.Count})";
@@ -273,14 +292,20 @@ namespace WinSnows
 
     public class Flake
     {
+        public Callback RemovalCallback;
+        public Callback ObliterateCallback;
+        public int id;
         public Rectangle flake;
         private short readyForChange = 0;
         private float direction = 0;        // 0:straight, -1:left, 1:right
         private bool atRest = false;
-        public int id;
 
-        public Flake(Int32 _startPos)
+
+        public Flake(Int32 _startPos, Callback _removalCallback, Callback _obliterateCallback)
         {
+            this.RemovalCallback = _removalCallback;
+            this.ObliterateCallback = _obliterateCallback;
+
             flake = new Rectangle();
             flake.Width = Global.flakeSize;
             flake.Height = Global.flakeSize;
@@ -309,8 +334,14 @@ namespace WinSnows
         {
             if (flake == null || atRest) return;
 
+
+
             int x = (int)Canvas.GetLeft(flake);
             int y = (int)Canvas.GetTop(flake);
+
+            // Controls layer packing; Used to compare StopPoints
+            int hitRange = (int)(x/1);
+
 
             // If snow reaches beyond the screen width, warp to other side
             #region Wall Detection
@@ -320,42 +351,65 @@ namespace WinSnows
                 Canvas.SetLeft(flake, (int)Global.snowWidth);
             #endregion
 
-            // Controls layer packing somehow
-            int adjustedX = (int)(x/1);
 
 
 
 
             // If this flake has reached the snowFloor
-            if (y >= Global.snowFloor - 1)
+            if (y >= Global.snowFloor - 2)
             {
-                StopPoint here = new StopPoint(x, y, adjustedX);
-                if (Global.stopPoints.Contains(here))// (adjustedX, out here))
+                // Identify this location as a StopPoint
+                StopPoint here = new StopPoint(x, y, hitRange);
+
+                // If this StopPoint already exists...
+                if (Global.stopPoints.Contains(here))
                 {
+                    // Get a reference to the existing StopPoint
                     StopPoint newPoint = Global.stopPoints.First<StopPoint>(item => item.HitRange == here.HitRange);
+
+                    // Check if existing StopPoint is within accumulation limits (if set)
                     if (newPoint.Count < Global.accumulationLimit || Global.accumulationLimit < 0)
                     {
+                        // increase accumulation at this point
                         newPoint.Count++;
-                        Canvas.SetLeft(flake, x);
-                        Canvas.SetTop(flake, Canvas.GetTop(flake) - (Global.flakeSize * newPoint.Count));
-                    }
-                }
-                else
-                {
-                    here = new StopPoint(x,y, adjustedX);
-                    Global.stopPoints.Add(here);
-                }
-                if (Global.accumulationLimit > 0 && here.Count >= Global.accumulationLimit)
-                    flake = null;
 
-                
-                Global.floorFlakes.Add(flake);
+                        // set the vertical position of the flake based on accumulation at this point and the flakeSize
+                        Canvas.SetTop(flake, Canvas.GetTop(flake) - (Global.flakeSize * newPoint.Count + 1));
+                    }
+
+                    here = newPoint;
+                }
+                else // if the StopPoint does not already exist...
+                {
+                    Global.stopPoints.Add(here);    // add it to the list of StopPoints
+                }
+
+                //  Put this Flake to rest and add it to the list of floorFlakes
                 atRest = true;
+                Global.floorFlakes.Add(this);
+
+
+                //  Garbage Cleanup Start
+                if (Global.accumulationLimit > 0 && here.Count >= Global.accumulationLimit)
+                {
+                    RemovalCallback(this);
+                }
                 
                 if(Global.floorFlakes.Count >= Global.w * 0.2)
                 {
-                    Global.snowFloor -= Global.flakeSize;
-                    Global.floorFlakes.Clear();
+                    // Actually need to remove _ALL_ Flakes from theCanvas.Children at this point....             <--------------------------------------------
+                    foreach (Flake thisFlake in Global.floorFlakes)
+                    {
+                        thisFlake.RemovalCallback(thisFlake);
+                        Global.flakesMarkedForObliteration.Add(this);   // mark this Flake for obliteration after the current update loop is complete
+                    }
+
+                    //  Raise the snowFloor
+                    Global.snowFloor -= Global.floorIncriment;
+                    //  Clear out the floorFlakes list
+                    Global.floorFlakes = new List<Flake>();
+                    //  Clear out StopPoints
+                    Global.stopPoints = new List<StopPoint>();
                 }
 
                 return;
