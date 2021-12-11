@@ -26,7 +26,7 @@ namespace WinSnows
 
 
         // settings
-        public static int flakeSize = 4;
+        public static int flakeSize = 2;
         public static short numFlakes = 15;   // MAX: 32767
         public static short speed = 2;        // MAX: 32767
         public static short flow = 3;         // MAX: 32767
@@ -237,11 +237,13 @@ namespace WinSnows
                 flake.UpdateFlake(rand);
 
             // Obliterates flakes given the death mark on last update loop
-            foreach (Flake deathFlake in Global.flakesMarkedForObliteration)
-                deathFlake.ObliterateCallback(deathFlake);
+            //foreach (Flake deathFlake in Global.flakesMarkedForObliteration)
+            //deathFlake.ObliterateCallback(deathFlake);
+            List<Flake> newList = Global.flakes.Except<Flake>(Global.flakesMarkedForObliteration).ToList();
+            Global.flakes = newList;
 
             // Clear out the obliteration list
-            Global.flakesMarkedForObliteration.Clear();
+            Global.flakesMarkedForObliteration = new List<Flake>();
 
             // Draws new flakes according to the flow setting
             if (stopWatch.Elapsed.TotalMilliseconds % Global.flow < 1)
@@ -294,7 +296,10 @@ namespace WinSnows
     {
         public Callback RemovalCallback;
         public Callback ObliterateCallback;
-        public int id;
+        public int id
+        {
+            get { return this.GetHashCode(); }
+        }
         public Rectangle flake;
         private short readyForChange = 0;
         private float direction = 0;        // 0:straight, -1:left, 1:right
@@ -313,8 +318,6 @@ namespace WinSnows
             flake.StrokeThickness = 0;
             Canvas.SetTop(flake, 2);
             Canvas.SetLeft(flake, _startPos);
-            Random r = new Random();
-            id = r.Next(int.MaxValue);
         }
 
         public override bool Equals(object obj)
@@ -323,7 +326,7 @@ namespace WinSnows
             if (obj == null || !this.GetType().Equals(obj.GetType()))
                 return false;
             else
-                return (this.id == other.id);
+                return (this.GetHashCode() == other.GetHashCode());
         }
         public override int GetHashCode()
         {
@@ -398,6 +401,7 @@ namespace WinSnows
                 if(Global.floorFlakes.Count >= Global.w * 0.2)
                 {
                     // Actually need to remove _ALL_ Flakes from theCanvas.Children at this point....             <--------------------------------------------
+                    
                     foreach (Flake thisFlake in Global.floorFlakes)
                     {
                         thisFlake.RemovalCallback(thisFlake);
