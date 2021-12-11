@@ -6,12 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 
@@ -21,9 +16,10 @@ namespace WinSnows
     {
         #region Debug Options
         public static bool DEBUG_MODE = true;
-        public static WindowState WINDOW_STATE = WindowState.Maximized;
-        //public static WindowState WINDOW_STATE = WindowState.Normal;
-        public static int DEBUG_WINDOW_POS = 250;
+        //public static WindowState WINDOW_STATE = WindowState.Maximized;
+        public static WindowState WINDOW_STATE = WindowState.Normal;
+        public static int WINDOW_WIDTH = 800;
+        public static int WINDOW_HEIGHT = 250;
         #endregion
 
 
@@ -166,21 +162,24 @@ namespace WinSnows
         private DispatcherTimer timer = new DispatcherTimer();
         private Stopwatch stopWatch = new Stopwatch();
 
+
         public MainWindow()
         {
             InitializeComponent();
-
+            this.WindowState = Global.WINDOW_STATE;
             //ShowDesktopWindows();
-            
-            //SecondaryWindow win2 = new SecondaryWindow();
-            //win2.Show();
         }
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
             if (Global.DEBUG_MODE)
             {
-                this.Left = Global.w + Global.DEBUG_WINDOW_POS;
-                this.WindowState = Global.WINDOW_STATE;
+                if(Global.WINDOW_STATE == WindowState.Normal)
+                {
+                    this.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+                    this.Width = Global.WINDOW_WIDTH;
+                    this.Height = Global.WINDOW_HEIGHT;
+                }
+
                 Global.Stick.Fill = Brushes.Magenta;
                 Global.Stick.Width = 800;
                 Global.Stick.Height = 1;
@@ -199,16 +198,34 @@ namespace WinSnows
             timer.Start();
             stopWatch.Start();
         }
+
+
+
+        private void DrawSnow()
+        {
+            for (int i = 0; i < Global.numFlakes; i++)
+            {
+                Flake flake = new Flake(rand.Next(1,(int)this.Width - 1));
+                Global.flakes.Add(flake);
+                theCanvas.Children.Add(flake.flake);
+            }
+        }
+
+
+
+
         private void UpdateStick(object sender, EventArgs e)
         {
-            Canvas.SetTop(Global.Stick, Global.snowFloor);
+            Canvas.SetTop(Global.Stick, Global.snowFloor - 1);
             Canvas.SetZIndex(Global.Stick, int.MaxValue);
         }
         private void UpdateFlakes(object sender, EventArgs e)
         {
+            // Updates each and every flake on the screen
             foreach (Flake flake in Global.flakes)
                 flake.UpdateFlake(rand);
 
+            // Executes if flakeLimit is set
             if (Global.flakes.Count > Global.flakeLimit && Global.flakeLimit > 0)
             {
                 theCanvas.Children.RemoveRange(0,Global.flakeLimit / 2);
@@ -216,21 +233,10 @@ namespace WinSnows
                 Console.WriteLine("FLAKES REMOVED");
             }
 
+            // Draws new flakes according to the flow setting
             if (stopWatch.Elapsed.TotalMilliseconds % Global.flow < 1)
                 DrawSnow();
-
         }
-
-        private void DrawSnow()
-        {
-            for (int i = 0; i < Global.numFlakes; i++)
-            {
-                Flake flake = new Flake(rand.Next((int)this.Width - 1));
-                Global.flakes.Add(flake);
-                theCanvas.Children.Add(flake.flake);
-            }
-        }
-
     }
 
     public class StopPoint
@@ -269,9 +275,10 @@ namespace WinSnows
     {
         public Rectangle flake;
         private short readyForChange = 0;
-        private float direction = 0; // 0:straight, -1:left, 1:right
+        private float direction = 0;        // 0:straight, -1:left, 1:right
         private bool atRest = false;
-        private int id;
+        public int id;
+
         public Flake(Int32 _startPos)
         {
             flake = new Rectangle();
@@ -282,7 +289,7 @@ namespace WinSnows
             Canvas.SetTop(flake, 2);
             Canvas.SetLeft(flake, _startPos);
             Random r = new Random();
-            id = r.Next();
+            id = r.Next(int.MaxValue);
         }
 
         public override bool Equals(object obj)
@@ -291,26 +298,36 @@ namespace WinSnows
             if (obj == null || !this.GetType().Equals(obj.GetType()))
                 return false;
             else
-                return ( Canvas.GetTop(this.flake) == Canvas.GetTop(other.flake) &&
-                         Canvas.GetLeft(this.flake) == Canvas.GetLeft(other.flake));
+                return (this.id == other.id);
         }
+        public override int GetHashCode()
+        {
+            return base.GetHashCode();
+        }
+
         public void UpdateFlake(Random _rand)
         {
             if (flake == null || atRest) return;
 
             int x = (int)Canvas.GetLeft(flake);
             int y = (int)Canvas.GetTop(flake);
-               
+
             // If snow reaches beyond the screen width, warp to other side
+            #region Wall Detection
             if (x > Global.snowWidth)
                 Canvas.SetLeft(flake, 0);
             if (x < 0)
                 Canvas.SetLeft(flake, (int)Global.snowWidth);
+            #endregion
 
+            // Controls layer packing somehow
             int adjustedX = (int)(x/1);
 
-            // If snow reaches bottom
-            if (y >= Global.snowFloor)
+
+
+
+            // If this flake has reached the snowFloor
+            if (y >= Global.snowFloor - 1)
             {
                 StopPoint here = new StopPoint(x, y, adjustedX);
                 if (Global.stopPoints.Contains(here))// (adjustedX, out here))
@@ -342,8 +359,12 @@ namespace WinSnows
                 }
 
                 return;
-            }
+            } // end if reached snowFloor
 
+
+
+
+            // If ready, this changes the course of the flake according to wobble settings
             if (readyForChange++ > Global.wobble / Global.speed)
             {
                 direction = (float)(_rand.NextDouble() * 3 - 1.75);
@@ -351,8 +372,10 @@ namespace WinSnows
             }
 
 
+            // Updates the position of the flake
             Canvas.SetTop(flake, Canvas.GetTop(flake) + Global.speed);
             Canvas.SetLeft(flake, Canvas.GetLeft(flake) + direction);
         }
+
     }
 }
